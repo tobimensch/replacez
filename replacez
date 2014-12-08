@@ -131,6 +131,16 @@ def find_match_num(num):
             i+=1
     return "("+num+") match not found"
 
+def total_matches():
+    global lines
+    i=0
+    for line in lines:
+        if line_is_matched(line):
+            i+=1
+    return i
+
+total_matches = total_matches()
+
 cur_match_num = 0
 line = find_match_num(cur_match_num)
 
@@ -181,8 +191,18 @@ while True:
                     c+=1
             continue
         elif i in ('g','goto'): #goto matched line number num
-            cur_match_num = raw_input("enter match num: ")
-            line = find_match_num(int(cur_match_num))
+            n = raw_input("enter match num [0-"+str(total_matches-1)+"]: ")
+            if(n.isdigit()):
+                num = int(n)
+                if not num > total_matches-1:
+                    line = find_match_num(num)
+                    cur_match_num = n
+                else:
+                    print "Number out of range"
+                    continue
+            else:
+                print "Invalid number entered"
+                continue
             break
         elif i in ('q','quit'):
             exit(0)
