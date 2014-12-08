@@ -105,7 +105,7 @@ def python_run(filename,ret=False):
         if ret:
             return out
         elif out != '':
-            print out
+            print out.rstrip()
 
 def extract_code(filename): #extract the user code from temp py file
     f = open(filename,'r')
