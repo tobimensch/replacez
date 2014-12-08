@@ -1,0 +1,211 @@
+#!/usr/bin/python
+"""replace or modify text lines from a file or stdin using python
+ * Repository and issue-tracker: https://github.com/tobimensch/replacez
+ * Licensed under terms of MIT license (see LICENSE-MIT)
+ * Copyright (c) 2014 Tobias Glaesser
+
+"""
+import os
+import sys
+import re
+import datetime
+import subprocess
+import tempfile
+import time
+
+from docopt import docopt
+from copy import deepcopy
+
+__all__ = ['replacez']
+__version__ = '0.1.0'
+
+
+doc ='''
+usage: replacez [options] <FILE>
+
+replace or modify text lines from a file or stdin using python 
+
+Options:
+  -m REG, --line-match REG    only work on lines matching regex
+                              i.e ".*CHECK_EQUAL.*"
+  -e FILE, --editor FILE       set your favorite editor
+  -o FILE, --output FILE      file to write to
+  -h, --help                  show this help message and exit
+  -v, --version               display version information
+
+'''
+
+opt = docopt(doc,None,True,__version__)
+
+
+match_line = ''
+editor = 'joe'
+
+if opt["<FILE>"]:
+    f = open(opt["<FILE>"],'r')
+else:
+    f = open(sys.stdin,'r')
+
+if opt["--line-match"]:
+    match_line = re.compile(opt["--line-match"])
+
+if opt["--editor"]:
+    editor = opt["--editor"]
+
+lines = f.readlines()
+
+replace_code = '''#!/usr/bin/python
+# -*- coding: utf-8 -*-
+import re
+import datetime
+import subprocess
+
+line = r\'\'\'LINE_GOES_HERE
+\'\'\'
+
+#line will be replaced with the output of this script
+#[-][_]# EDIT BELOW - DON'T REMOVE THIS LINE #[_][-]#
+
+CODE_GOES_HERE
+'''
+
+
+#simplify subprocess.call
+def shell(s,suppress_output=False):
+    if suppress_output:
+        FNULL = open(os.devnull, 'w')
+        subprocess.call(s, stderr=FNULL, shell=True)
+    else:
+        subprocess.call(s, shell=True)
+
+def write_line_to_temp(line,code=''):
+    s = replace_code.replace('LINE_GOES_HERE',line.rstrip())
+    s = s.replace('CODE_GOES_HERE',code)
+    f = tempfile.NamedTemporaryFile(delete=False,suffix='.py')
+    f.write(s)
+    f.close()
+    return f.name
+
+def line_is_matched(line):
+    global opt
+    global match_line
+
+    if opt["--line-match"]:
+        return match_line.match(line)
+    return True
+
+def python_run(filename,ret=False):
+    p = subprocess.Popen(["python",filename], stdout=subprocess.PIPE)
+    out, err = p.communicate()
+    if p.returncode != 0:
+        print err
+        print "something went wrong in execution of replace script"
+        return ''
+    else:
+        if ret:
+            return out
+        elif out != '':
+            print out
+
+def extract_code(filename): #extract the user code from temp py file
+    f = open(filename,'r')
+    lines = f.readlines()
+
+    code = ''
+    start = False
+    for line in lines:
+        if line.strip() == "#[-][_]# EDIT BELOW - DON'T REMOVE THIS LINE #[_][-]#":
+            start = True
+            continue
+        if not start:
+            continue
+        code+=line
+    return code
+
+def find_match_num(num):
+    i=0
+    for line in lines:
+        if line_is_matched(line):
+            if i == num:
+                return line
+            i+=1
+    return "("+num+") match not found"
+
+cur_match_num = 0
+line = find_match_num(cur_match_num)
+
+rows, columns = os.popen('stty size', 'r').read().split()
+
+if opt["--output"]:
+    outfilename = opt["--output"]
+else:
+    if opt["<FILE>"]:
+        outfilename = opt["<FILE>"]+'.replacez'
+    else:
+        outfilename = 'out.replacez'
+
+while True:
+    filename = write_line_to_temp(line)
+    shell(editor+" "+filename,True)
+    python_run(filename)
+
+    while True:
+        i = raw_input("["+str(cur_match_num)+"]: ")
+
+        if i in ('0','apply'): #apply to all
+            code = extract_code(filename)
+            for line in lines:
+                if line_is_matched(line):
+                    tmp = write_line_to_temp(line,code)
+                    python_run(tmp)
+            continue
+        if i in ('w','write'): #write
+            ofn = raw_input("write to file [default: '"+outfilename+"']: ")
+            if ofn.split() != '':
+                outfilename = ofn
+            code = extract_code(filename)
+            f=open(outfilename,'w+')
+            for line in lines:
+                if line_is_matched(line):
+                    tmp = write_line_to_temp(line,code)
+                    f.write(python_run(tmp,True))
+                else:
+                    f.write(line)
+            f.close()
+            continue
+        elif i in ('v','view'): #view matched lines
+            c=0
+            for line in lines:
+                if line_is_matched(line):
+                    print str(c)+': '+line.rstrip()
+                    c+=1
+            continue
+        elif i in ('g','goto'): #goto matched line number num
+            cur_match_num = raw_input("enter match num: ")
+            line = find_match_num(int(cur_match_num))
+            break
+        elif i in ('q','quit'):
+            exit(0)
+        elif i in ('e','editor'):
+            editor = raw_input("enter editor command: ")
+            continue
+        elif i in ('h','help'):
+            help=str("[help])").center(int(columns),'-')
+            help+='''
+z|[default]    start editor
+v|view         view all matched lines in original state
+0|apply        view all matched lines with user's replacing applied
+g|goto         goto matched line. prompts you for a number. see numbers with (v) or (0)
+e|editor       set editor
+w|write        write to file. prompts user for filename [defaults to: --output FILE or <FILE>.replacez]
+q|quit         quit
+h|help         view this help
+'''
+            help+=str().rjust(int(columns),'-')
+            print help
+            continue
+        else:
+            shell(editor+" "+filename,True)
+            python_run(filename)
+            continue
+
